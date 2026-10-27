@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Node.js Cinema API - Back-End Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600;700&display=swap');
+        
+        body {
+            font-family: 'Fira Code', monospace;
+            background-color: #0f172a; /* slate-900 */
+            color: #e2e8f0; /* slate-200 */
+            touch-action: manipulation; /* Evita zoom no double-tap no celular */
+        }
+
+        #game-container {
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
+        }
+
+        canvas {
+            image-rendering: pixelated;
+        }
+
+        .btn-route {
+            transition: all 0.1s ease-in-out;
+        }
+        
+        .btn-route:active {
+            transform: scale(0.95);
+        }
+
+        /* Scanline effect for terminal feel */
+        .scanlines::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(
+                to bottom,
+                rgba(18, 16, 16, 0) 50%,
+                rgba(0, 0, 0, 0.25) 50%
+            );
+            background-size: 100% 4px;
+            z-index: 10;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-2 sm:p-4">
+
+    <!-- Game Wrapper -->
+    <div id="game-container" class="relative w-full max-w-4xl bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex flex-col">
+        
+        <!-- Header / Status Bar -->
+        <div class="bg-slate-900 border-b border-slate-700 p-4 flex justify-between items-center shrink-0">
+            <div>
+                <span class="text-green-400 font-bold">200 OK:</span>
+                <span id="score-display" class="text-2xl ml-2">0</span>
+            </div>
+            <div class="text-center text-slate-300 text-sm hidden sm:block">
+                <span>NÍVEL: <strong id="level-display" class="text-yellow-400">1</strong></span>
+                <span class="mx-2">|</span>
+                <span>VELOCIDADE: <strong id="speed-display" class="text-blue-400">1.0x</strong></span>
+            </div>
+            <div>
+                <span class="text-red-400 font-bold">500 Errors:</span>
+                <span id="errors-display" class="text-2xl ml-2 text-red-500">0 / 3</span>
+            </div>
+        </div>
+
+        <!-- Canvas Area -->
+        <div class="relative w-full h-[350px] sm:h-[450px] bg-slate-900 scanlines shrink-0">
+            <canvas id="gameCanvas" class="w-full h-full block"></canvas>
+            
+            <!-- Start Screen Overlay -->
+            <div id="start-screen" class="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center z-20 p-4 text-center">
+                <h1 class="text-3xl sm:text-4xl font-bold text-green-400 mb-4">&lt;Node.js Cinema /&gt;</h1>
+                <p class="mb-4 max-w-lg text-slate-300">
+                    Você é o <span class="text-yellow-400">Event Loop</span> de uma bilheteria online! 
+                    Requisições HTTP estão chegando. Responda-as enviando a reposta certa (`res.send`) antes que dê <span class="text-red-400">Timeout</span>.
+                </p>
+                <div class="text-left mb-4 bg-slate-800 p-4 rounded border border-slate-600">
+                    <p>🎬 <strong>GET /filme</strong> -> Tecla <strong>[A]</strong></p>
+                    <p>🎟️ <strong>POST /ingresso</strong> -> Tecla <strong>[W]</strong></p>
+                    <p>🍿 <strong>GET /pipoca</strong> -> Tecla <strong>[D]</strong></p>
+                    <p class="text-yellow-300 text-xs mt-2 font-mono">⚡ Dica: Conforme o score sobe, o tráfego aumenta e as requisições expiram mais rápido!</p>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-3 w-full max-w-xs sm:max-w-md">
+                    <button id="learn-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg border-b-4 border-indigo-800 active:border-b-0 active:translate-y-1 transition-all flex-1">
+                        📚 Como Funciona o Back-End?
+                    </button>
+                    <button id="start-btn" class="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-8 rounded-lg shadow-lg border-b-4 border-green-800 active:border-b-0 active:translate-y-1 transition-all flex-1">
+                        npm start
+                    </button>
+                </div>
+            </div>
+
+            <!-- Learn Modal Overlay -->
+            <div id="learn-modal" class="absolute inset-0 bg-slate-950/95 flex flex-col z-30 p-4 sm:p-6 text-left hidden overflow-y-auto">
+                <div class="flex justify-between items-center pb-3 border-b border-slate-700 mb-4">
+                    <h2 class="text-xl sm:text-2xl font-bold text-indigo-400 font-mono">📖 Guia do Back-End & APIs</h2>
+                    <button id="close-learn-btn" class="text-slate-400 hover:text-white text-2xl font-bold px-2 py-1 bg-slate-800 rounded border border-slate-700 hover:bg-slate-700">&times;</button>
+                </div>
+
+                <div class="space-y-4 text-xs sm:text-sm text-slate-300 font-mono overflow-y-auto pr-1">
+                    <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+                        <h3 class="text-yellow-400 font-bold mb-1 text-sm sm:text-base">1. O que é o Back-End?</h3>
+                        <p>É o "cérebro" nos bastidores da aplicação. Enquanto o Front-End é a tela do cinema que você vê, o Back-End gerencia o estoque de bilhetes, valida pagamentos, grava compras no banco de dados e coordena as regras de negócio.</p>
+                    </div>
+
+                    <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+                        <h3 class="text-blue-400 font-bold mb-1 text-sm sm:text-base">2. O que é uma API e Requisições HTTP?</h3>
+                        <p>API (Application Programming Interface) é o balcão de atendimento do cinema. As aplicações do cliente (site/mobile) enviam <strong>requisições HTTP</strong> com pedidos específicos:</p>
+                        <ul class="list-disc pl-5 mt-1 space-y-1 text-slate-400">
+                            <li><strong class="text-blue-300">GET:</strong> Busca dados sem alterar nada (ex: consultar cartaz de filmes ou preço de pipoca).</li>
+                            <li><strong class="text-purple-300">POST:</strong> Envia dados para criar/processar algo novo (ex: registrar a compra de um ingresso).</li>
+                        </ul>
+                    </div>
+
+                    <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+                        <h3 class="text-green-400 font-bold mb-1 text-sm sm:text-base">3. O que é o Event Loop no Node.js?</h3>
+                        <p>No Node.js, existe apenas uma thread principal que processa as requisições em uma fila chamada <strong>Event Loop</strong>. Ele pega as requisições que vão chegando e as executa uma a uma sem travar a aplicação. No jogo, você faz o papel do Event Loop!</p>
+                    </div>
+
+                    <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+                        <h3 class="text-red-400 font-bold mb-1 text-sm sm:text-base">4. O que é Timeout & Status HTTP?</h3>
+                        <p>Se o servidor demorar muito para dar um <code class="bg-slate-800 px-1 py-0.5 rounded text-green-300">res.send()</code>, o cliente desiste e gera um <strong>Timeout</strong> (Erro 500/503). Quando você responde com a rota certa a tempo, o servidor retorna status <strong class="text-green-400">200 OK</strong>!</p>
+                    </div>
+                </div>
+
+                <div class="mt-4 pt-3 border-t border-slate-800 flex justify-end">
+                    <button id="understand-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-6 rounded shadow border-b-2 border-indigo-800 active:translate-y-0.5">
+                        Entendi, Vamos Jogar!
+                    </button>
+                </div>
+            </div>
+
+            <!-- Game Over Screen Overlay -->
+            <div id="game-over-screen" class="absolute inset-0 bg-red-900/90 flex flex-col items-center justify-center z-20 p-4 text-center hidden">
+                <h1 class="text-4xl font-bold text-white mb-2">FATAL ERROR</h1>
+                <h2 class="text-2xl text-red-300 mb-4">503 Service Unavailable</h2>
+                <p class="mb-2 text-slate-200 text-lg">O servidor sobrecarregou e o processo foi finalizado.</p>
+                <p class="mb-2 text-white text-xl">Total de Requisições Salvas: <span id="final-score" class="font-bold text-green-300">0</span></p>
+                <p class="mb-6 text-slate-300 text-sm">Nível Máximo Alcançado: <span id="final-level" class="font-bold text-yellow-300">1</span></p>
+                <button id="restart-btn" class="bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg border-b-4 border-slate-900 active:border-b-0 active:translate-y-1 transition-all">
+                    node server.js (Restart)
+                </button>
+            </div>
+        </div>
+
+        <!-- Controls (Routes) -->
+        <div class="bg-slate-800 p-4 sm:p-6 grid grid-cols-1 sm:grid-cols-3 gap-4 border-t border-slate-700 shrink-0">
+            <button class="btn-route route-btn bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 sm:py-4 px-4 rounded shadow-lg border-b-4 border-blue-800 flex flex-col items-center" data-type="GET_FILME">
+                <span class="text-2xl mb-1">🎬</span>
+                <span>app.get('/filme')</span>
+                <span class="text-xs text-blue-200 mt-1 bg-blue-800/60 px-2 py-0.5 rounded">[A]</span>
+            </button>
+            <button class="btn-route route-btn bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 sm:py-4 px-4 rounded shadow-lg border-b-4 border-purple-800 flex flex-col items-center" data-type="POST_INGRESSO">
+                <span class="text-2xl mb-1">🎟️</span>
+                <span>app.post('/ingresso')</span>
+                <span class="text-xs text-purple-200 mt-1 bg-purple-800/60 px-2 py-0.5 rounded">[W]</span>
+            </button>
+            <button class="btn-route route-btn bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 sm:py-4 px-4 rounded shadow-lg border-b-4 border-yellow-800 flex flex-col items-center" data-type="GET_PIPOCA">
+                <span class="text-2xl mb-1">🍿</span>
+                <span>app.get('/pipoca')</span>
+                <span class="text-xs text-yellow-200 mt-1 bg-yellow-800/60 px-2 py-0.5 rounded">[D]</span>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Game Constants & Config
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // DOM Elements
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const learnModal = document.getElementById('learn-modal');
+        const startBtn = document.getElementById('start-btn');
+        const learnBtn = document.getElementById('learn-btn');
+        const closeLearnBtn = document.getElementById('close-learn-btn');
+        const understandBtn = document.getElementById('understand-btn');
+        const restartBtn = document.getElementById('restart-btn');
+        const routeBtns = document.querySelectorAll('.route-btn');
+        const scoreDisplay = document.getElementById('score-display');
+        const errorsDisplay = document.getElementById('errors-display');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const finalLevelDisplay = document.getElementById('final-level');
+        const levelDisplay = document.getElementById('level-display');
+        const speedDisplay = document.getElementById('speed-display');
+
+        // Request Types Definition
+        const REQ_TYPES = {
+            GET_FILME: { label: 'GET /filme', icon: '🎬', color: '#3b82f6' },      // blue
+            POST_INGRESSO: { label: 'POST /ingresso', icon: '🎟️', color: '#9333ea' }, // purple
+            GET_PIPOCA: { label: 'GET /pipoca', icon: '🍿', color: '#ca8a04' }      // yellow
+        };
+
+        // Game State
+        let state = {
+            isRunning: false,
+            score: 0,
+            level: 1,
+            speedMultiplier: 1.0,
+            errors: 0,
+            maxErrors: 3,
+            requests: [],
+            spawnTimer: 0,
+            baseSpawnInterval: 2800, // Tempo base em ms
+            spawnInterval: 2800,
+            baseTtl: 5000,          // Tempo de expiração base em ms
+            lastTime: 0,
+            particles: []
+        };
+
+        // Resize canvas to match display size
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Classes
+        class Request {
+            constructor(typeKey, currentSpeedMultiplier, baseTtl) {
+                this.id = Math.random().toString(36).substr(2, 9);
+                this.typeKey = typeKey;
+                this.type = REQ_TYPES[typeKey];
+                
+                // Spawn off-screen to the right
+                this.x = canvas.width + 100;
+                this.y = canvas.height / 2;
+                this.targetX = 0; // Will be set by queue position
+                
+                // Timeout logic - reduz TTL baseado na velocidade atual do jogo
+                this.maxTtl = Math.max(1800, baseTtl / Math.sqrt(currentSpeedMultiplier));
+                this.ttl = this.maxTtl;
+                this.status = 'pending'; // pending, success, failed
+                
+                // Visuals
+                this.width = 140;
+                this.height = 60;
+                
+                // Floating animation
+                this.floatOffset = Math.random() * Math.PI * 2;
+            }
+
+            update(dt, queueIndex) {
+                if (this.status !== 'pending') return;
+
+                // Move towards queue position
+                this.targetX = 100 + (queueIndex * (this.width + 20));
+                
+                // Interpolation smooth speed scales with level speed
+                this.x += (this.targetX - this.x) * (0.1 * Math.min(2.5, state.speedMultiplier));
+                
+                // Update time to live
+                this.ttl -= dt;
+                
+                if (this.ttl <= 0) {
+                    this.status = 'failed';
+                    registerError("Timeout");
+                }
+            }
+
+            draw(ctx) {
+                const yPos = this.y - (this.height/2) + Math.sin(performance.now() / 300 + this.floatOffset) * 5;
+                
+                // Main box
+                ctx.fillStyle = '#1e293b'; // slate-800
+                ctx.strokeStyle = this.type.color;
+                ctx.lineWidth = 2;
+                
+                ctx.beginPath();
+                ctx.roundRect(this.x, yPos, this.width, this.height, 8);
+                ctx.fill();
+                ctx.stroke();
+
+                // Icon & Text
+                ctx.fillStyle = '#f8fafc'; // slate-50
+                ctx.font = '14px "Fira Code", monospace';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`${this.type.icon} ${this.type.label}`, this.x + 10, yPos + this.height / 2 - 5);
+
+                // Progress Bar (TTL)
+                const barWidth = this.width - 20;
+                const progress = Math.max(0, this.ttl / this.maxTtl);
+                
+                ctx.fillStyle = '#334155'; // slate-700
+                ctx.fillRect(this.x + 10, yPos + this.height - 15, barWidth, 4);
+                
+                // Color changes based on time left
+                ctx.fillStyle = progress > 0.5 ? '#10b981' : progress > 0.2 ? '#eab308' : '#ef4444';
+                ctx.fillRect(this.x + 10, yPos + this.height - 15, barWidth * progress, 4);
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color, text) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.text = text;
+                this.vx = (Math.random() - 0.5) * 4;
+                this.vy = (Math.random() - 1) * 4 - 2;
+                this.life = 1.0;
+            }
+            update(dt) {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.life -= dt / 1000; // 1 second life
+            }
+            draw(ctx) {
+                ctx.globalAlpha = Math.max(0, this.life);
+                ctx.fillStyle = this.color;
+                ctx.font = 'bold 16px "Fira Code", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(this.text, this.x, this.y);
+                ctx.globalAlpha = 1.0;
+            }
+        }
+
+        // Core Functions
+        function initGame() {
+            state = {
+                isRunning: true,
+                score: 0,
+                level: 1,
+                speedMultiplier: 1.0,
+                errors: 0,
+                maxErrors: 3,
+                requests: [],
+                spawnTimer: 0,
+                baseSpawnInterval: 2800,
+                spawnInterval: 2800,
+                baseTtl: 5000,
+                lastTime: performance.now(),
+                particles: []
+            };
+            
+            updateUI();
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            
+            // Add first request immediately
+            spawnRequest();
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        function spawnRequest() {
+            const types = Object.keys(REQ_TYPES);
+            const randomType = types[Math.floor(Math.random() * types.length)];
+            state.requests.push(new Request(randomType, state.speedMultiplier, state.baseTtl));
+        }
+
+        function registerError(reason) {
+            state.errors++;
+            updateUI();
+            
+            // Shake effect on canvas
+            canvas.style.transform = 'translate(5px, 0)';
+            setTimeout(() => canvas.style.transform = 'translate(-5px, 0)', 50);
+            setTimeout(() => canvas.style.transform = 'translate(5px, 0)', 100);
+            setTimeout(() => canvas.style.transform = 'translate(0, 0)', 150);
+
+            if (state.errors >= state.maxErrors) {
+                triggerGameOver();
+            }
+        }
+
+        function triggerGameOver() {
+            state.isRunning = false;
+            finalScoreDisplay.innerText = state.score;
+            finalLevelDisplay.innerText = state.level;
+            gameOverScreen.classList.remove('hidden');
+        }
+
+        function updateDifficulty() {
+            // A cada ponto, o jogo acelera levemente
+            // Nível sobe a cada 5 pontos
+            state.level = Math.floor(state.score / 5) + 1;
+            
+            // Aumento contínuo de velocidade baseado no score
+            state.speedMultiplier = 1.0 + (state.score * 0.08); 
+            
+            // Reduz o intervalo de geração de novas requisições (mínimo de 500ms)
+            state.spawnInterval = Math.max(500, state.baseSpawnInterval / state.speedMultiplier);
+        }
+
+        function updateUI() {
+            scoreDisplay.innerText = state.score;
+            errorsDisplay.innerText = `${state.errors} / ${state.maxErrors}`;
+            if (levelDisplay) levelDisplay.innerText = state.level;
+            if (speedDisplay) speedDisplay.innerText = `${state.speedMultiplier.toFixed(1)}x`;
+        }
+
+        function handleInput(typeKey) {
+            if (!state.isRunning) return;
+
+            // Find first pending request
+            const currentReqIndex = state.requests.findIndex(r => r.status === 'pending');
+            
+            if (currentReqIndex === -1) {
+                return;
+            }
+
+            const req = state.requests[currentReqIndex];
+
+            if (req.typeKey === typeKey) {
+                // Success! 200 OK
+                req.status = 'success';
+                state.score++;
+                
+                // Recalcula o nível e ritmo do jogo
+                updateDifficulty();
+                
+                // Visual feedback
+                state.particles.push(new Particle(req.x + req.width/2, req.y, '#10b981', '200 OK'));
+                updateUI();
+            } else {
+                // Wrong route! 404 / 500
+                req.status = 'failed';
+                state.particles.push(new Particle(req.x + req.width/2, req.y, '#ef4444', '500 ERROR'));
+                registerError("Wrong Route");
+            }
+        }
+
+        // Keyboard Controls
+        window.addEventListener('keydown', (e) => {
+            if (!state.isRunning) return;
+            
+            const key = e.key.toLowerCase();
+            if (key === 'a') {
+                handleInput('GET_FILME');
+            } else if (key === 'w') {
+                handleInput('POST_INGRESSO');
+            } else if (key === 'd') {
+                handleInput('GET_PIPOCA');
+            }
+        });
+
+        // Draw Environment (Server representation)
+        function drawBackground(ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw "Server CPU/Backend" Counter on the left
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, 100, canvas.height);
+            
+            // Server details
+            ctx.fillStyle = '#334155';
+            ctx.fillRect(10, canvas.height/2 - 80, 80, 160);
+            
+            // Blinking lights (Piscam mais rápido dependendo do speedMultiplier)
+            const t = performance.now() * (0.8 + state.speedMultiplier * 0.4);
+            ctx.fillStyle = (Math.floor(t / 500) % 2 === 0) ? '#10b981' : '#047857';
+            ctx.beginPath();
+            ctx.arc(30, canvas.height/2 - 60, 5, 0, Math.PI*2);
+            ctx.fill();
+            
+            ctx.fillStyle = (Math.floor(t / 200) % 2 === 0) ? '#3b82f6' : '#1d4ed8';
+            ctx.beginPath();
+            ctx.arc(50, canvas.height/2 - 60, 5, 0, Math.PI*2);
+            ctx.fill();
+
+            // Text vertical
+            ctx.save();
+            ctx.translate(70, canvas.height/2);
+            ctx.rotate(-Math.PI/2);
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '16px "Fira Code"';
+            ctx.textAlign = 'center';
+            ctx.fillText('EXPRESS.JS', 0, 0);
+            ctx.restore();
+
+            // Server connecting line
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(100, canvas.height/2);
+            ctx.lineTo(canvas.width, canvas.height/2);
+            ctx.stroke();
+        }
+
+        // Main Loop
+        function gameLoop(timestamp) {
+            if (!state.isRunning) return;
+
+            const dt = timestamp - state.lastTime;
+            state.lastTime = timestamp;
+
+            // Spawning Logic
+            state.spawnTimer += dt;
+            if (state.spawnTimer >= state.spawnInterval) {
+                spawnRequest();
+                state.spawnTimer = 0;
+            }
+
+            drawBackground(ctx);
+
+            // Update & Draw Requests
+            let pendingCount = 0;
+            for (let i = 0; i < state.requests.length; i++) {
+                const req = state.requests[i];
+                
+                if (req.status === 'pending') {
+                    req.update(dt, pendingCount);
+                    req.draw(ctx);
+                    pendingCount++;
+                }
+            }
+
+            // Clean up handled/failed requests
+            state.requests = state.requests.filter(req => {
+                if (req.status === 'success' || req.status === 'failed') {
+                    return false; 
+                }
+                return true;
+            });
+
+            // Update & Draw Particles
+            for (let i = state.particles.length - 1; i >= 0; i--) {
+                const p = state.particles[i];
+                p.update(dt);
+                p.draw(ctx);
+                if (p.life <= 0) state.particles.splice(i, 1);
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Event Listeners
+        startBtn.addEventListener('click', initGame);
+        restartBtn.addEventListener('click', initGame);
+
+        learnBtn.addEventListener('click', () => {
+            learnModal.classList.remove('hidden');
+        });
+
+        const closeLearnModal = () => {
+            learnModal.classList.add('hidden');
+        };
+
+        closeLearnBtn.addEventListener('click', closeLearnModal);
+        understandBtn.addEventListener('click', closeLearnModal);
+
+        routeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const type = btn.getAttribute('data-type');
+                handleInput(type);
+            });
+            // Touch specific for better mobile responsiveness
+            btn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const type = btn.getAttribute('data-type');
+                handleInput(type);
+            }, {passive: false});
+        });
+
+    </script>
+</body>
+</html>
